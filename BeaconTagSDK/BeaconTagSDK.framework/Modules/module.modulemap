@@ -1,0 +1,10 @@
+framework module BeaconTagSDK {
+	umbrella header "BeaconTagSDK_FWK.h"
+	
+	header "BeaconTagSDK.h"
+	header "BeaconTagConfiguration.h"
+	header "BeaconTagConfigurationValues.h"
+	
+	export *
+	module * { export * }
+}
