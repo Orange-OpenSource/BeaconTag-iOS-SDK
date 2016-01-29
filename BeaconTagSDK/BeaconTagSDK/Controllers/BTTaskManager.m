@@ -38,6 +38,7 @@ static NSTimeInterval const optionalTaskTimeout = 4;
 @property (nonatomic) CBCentralManager *btManager;
 @property (nonatomic) CBPeripheral *connectingPeripheral;
 @property (nonatomic) NSMutableSet *connectedPeripherals;
+@property (nonatomic) NSMutableSet *disconnectedPeripherals; // UUID strings of peripherals that should not be reconnected.
 @property (nonatomic) NSMutableDictionary *checkUUIDTasks; // UUID:Major:Minor -> checkUUIDTask
 @property (nonatomic) NSMutableDictionary *peripheralUUIDs; // peripheral.identifier -> {UUID/M/m}
 @end
@@ -56,6 +57,7 @@ static NSTimeInterval const optionalTaskTimeout = 4;
         _peripheralUUIDs = [[NSMutableDictionary alloc] init];
         _tasksQueue = dispatch_queue_create("TasksQueue", DISPATCH_QUEUE_SERIAL);
         _connectedPeripherals = [[NSMutableSet alloc] init];
+        _disconnectedPeripherals = [[NSMutableSet alloc] init];
         _btManager = [[CBCentralManager alloc] initWithDelegate:self queue:_tasksQueue options:@{
                 CBCentralManagerOptionShowPowerAlertKey:@NO
             }];
@@ -88,6 +90,8 @@ static NSTimeInterval const optionalTaskTimeout = 4;
     }
     [self.connectedPeripherals removeAllObjects];
     
+    [self.disconnectedPeripherals removeAllObjects];
+
     self.currentTask = nil;
     dispatch_async(self.tasksQueue, ^{
             [self.tasks removeAllObjects];
@@ -316,6 +320,11 @@ NSString *identifierStringFromData(NSDictionary *dataValues)
         return;
     }
     
+    else if ([self.disconnectedPeripherals containsObject:peripheral.identifier.UUIDString]) {
+        DDLogDebug(@"Skipping reconnection to peripheral %@.", peripheral.identifier.UUIDString);
+        return;
+    }
+
     // Ready to connect.
     self.connectingPeripheral = peripheral;
 
@@ -327,6 +336,12 @@ NSString *identifierStringFromData(NSDictionary *dataValues)
 - (void)centralManager:(CBCentralManager *)central didConnectPeripheral:(CBPeripheral *)peripheral
 {
     DDLogDebug(@"Connected peripheral %@.", peripheral.identifier.UUIDString);
+    
+    if ([self.disconnectedPeripherals containsObject:peripheral.identifier.UUIDString]) {
+        DDLogDebug(@"Skip reconnecting to peripheral %@...", peripheral.identifier.UUIDString);
+        [central cancelPeripheralConnection:peripheral];
+    }
+
     [self.connectedPeripherals addObject:peripheral];
 
     if (self.currentTask) {
@@ -478,6 +493,10 @@ NSString *identifierStringFromData(NSDictionary *dataValues)
             else {
                 DDLogInfo(@"We are not interested in BeaconTag %@...", identifierString);
                 [self.peripheralUUIDs removeObjectForKey:peripheral.identifier.UUIDString];
+                
+                DDLogDebug(@"From now will ignore peripheral %@.", peripheral.identifier.UUIDString);
+                [self.disconnectedPeripherals addObject:peripheral.identifier.UUIDString];
+
                 [self.btManager cancelPeripheralConnection:peripheral];
                 return;
             }
@@ -515,6 +534,9 @@ NSString *identifierStringFromData(NSDictionary *dataValues)
         if (self.currentTask.disconnectAfterFinishing) {
             for (CBPeripheral *peripheral in self.connectedPeripherals) {
                 [self.btManager cancelPeripheralConnection:peripheral];
+
+                DDLogDebug(@"From now will ignore peripheral %@.", peripheral.identifier.UUIDString);
+                [self.disconnectedPeripherals addObject:peripheral.identifier.UUIDString];
             }
         }
         
